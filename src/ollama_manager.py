@@ -1,72 +1,101 @@
-import subprocess
 import requests
 import time
 import sys
-import json
 
 OCR_MODEL = "deepseek-ocr"
+REFINER_MODEL = "qwen2.5:14b"
 OLLAMA_API_BASE = "http://localhost:11434/api"
 
+# Timeout en segundos para las llamadas a la API de Ollama (3 minutos)
+LLM_TIMEOUT = 180
+
 def check_ollama_running():
-    """Verify if Ollama service is reachable."""
+    """Verifica si el servicio de Ollama está accesible."""
     try:
-        response = requests.get(f"http://localhost:11434/", timeout=2)
+        response = requests.get("http://localhost:11434/", timeout=2)
         if response.status_code == 200:
             print("[INFO] Ollama service is running.")
             return True
     except requests.ConnectionError:
         pass
-    print("[ERROR] Ollama is not running. Please start the Ollama service.")
+    print("[ERROR] Ollama no está corriendo. Por favor, inicia el servicio de Ollama.")
     return False
 
-def unload_current_models():
-    """Unload all currently active models from memory."""
-    print("[INFO] Checking currently loaded models to free VRAM...")
+def get_loaded_models():
+    """Devuelve una lista con los nombres de los modelos actualmente cargados en VRAM."""
     try:
-        response = requests.get(f"{OLLAMA_API_BASE}/ps")
+        response = requests.get(f"{OLLAMA_API_BASE}/ps", timeout=10)
         if response.status_code == 200:
-            models = response.json().get("models", [])
-            for model in models:
-                model_name = model.get("name")
-                if model_name:
-                    print(f"[INFO] Unloading model {model_name}...")
-                    # Unload model by asking to keep it alive for 0 seconds
-                    unload_payload = {"model": model_name, "keep_alive": 0}
-                    requests.post(f"{OLLAMA_API_BASE}/generate", json=unload_payload)
-            print("[INFO] VRAM should be freed.")
-            time.sleep(1) # Give it a moment to unload completely
-        else:
-            print(f"[WARN] Failed to fetch running models: {response.text}")
+            return [m.get("name") for m in response.json().get("models", []) if m.get("name")]
     except requests.RequestException as e:
-        print(f"[WARN] Error fetching running models: {e}")
+        print(f"[WARN] No se pudo obtener los modelos activos: {e}")
+    return []
 
-def load_ocr_model():
-    """Ensure the target OCR model is downloaded and loaded."""
-    if not check_ollama_running():
-        sys.exit(1)
-        
-    unload_current_models()
-    
-    print(f"[INFO] Ensuring model '{OCR_MODEL}' is ready (this may take a moment if it's not downloaded)...")
-    # First check if we have it locally, otherwise pull it could be slow but we can just use generate call
-    # which automatically pulls if missing (in recent versions of Ollama). Or we can trigger a pre-flight generate.
-    
-    # Pre-warm the model
+def unload_model(model_name):
+    """Descarga un modelo específico de la VRAM."""
+    print(f"[INFO] Descargando modelo '{model_name}' de la VRAM...")
     try:
-        payload = {
-            "model": OCR_MODEL,
-            "keep_alive": "1h" # keep alive for 1 hour to avoid reload
-        }
-        # The first request will load the model into VRAM
-        response = requests.post(f"{OLLAMA_API_BASE}/generate", json=payload)
+        payload = {"model": model_name, "keep_alive": 0}
+        requests.post(f"{OLLAMA_API_BASE}/generate", json=payload, timeout=15)
+        time.sleep(1)
+    except requests.RequestException as e:
+        print(f"[WARN] Error al descargar modelo '{model_name}': {e}")
+
+def unload_all_models():
+    """Descarga todos los modelos activos de la VRAM."""
+    print("[INFO] Liberando VRAM de todos los modelos cargados...")
+    loaded = get_loaded_models()
+    for model_name in loaded:
+        unload_model(model_name)
+    if loaded:
+        print("[INFO] VRAM liberada.")
+    else:
+        print("[INFO] No había modelos cargados.")
+
+def is_model_loaded(model_name):
+    """Comprueba si un modelo específico ya está cargado en VRAM."""
+    return model_name in get_loaded_models()
+
+def load_model(model_name):
+    """
+    Carga un modelo en la VRAM de Ollama usando keep_alive.
+    Si ya está cargado, no lo recarga (ahorra tiempo).
+    """
+    if is_model_loaded(model_name):
+        print(f"[INFO] El modelo '{model_name}' ya está cargado en VRAM.")
+        return
+
+    print(f"[INFO] Cargando modelo '{model_name}' en VRAM...")
+    try:
+        payload = {"model": model_name, "keep_alive": "2h"}
+        response = requests.post(f"{OLLAMA_API_BASE}/generate", json=payload, timeout=30)
         if response.status_code == 200:
-            print(f"[INFO] Successfully loaded model '{OCR_MODEL}' into VRAM.")
+            print(f"[INFO] Modelo '{model_name}' cargado correctamente.")
         else:
-            print(f"[ERROR] Failed to load model '{OCR_MODEL}': {response.text}")
+            print(f"[ERROR] Fallo al cargar el modelo '{model_name}': {response.text}")
             sys.exit(1)
     except Exception as e:
-        print(f"[ERROR] Could not communicate with Ollama to load model: {e}")
+        print(f"[ERROR] No se pudo comunicar con Ollama para cargar el modelo: {e}")
         sys.exit(1)
 
+def prepare_ocr_phase():
+    """Inicializa Ollama y carga el modelo de OCR para la fase 1."""
+    if not check_ollama_running():
+        sys.exit(1)
+    unload_all_models()
+    load_model(OCR_MODEL)
+
+def switch_to_refiner_phase():
+    """Descarga el modelo OCR y carga el modelo de refinamiento para la fase 2."""
+    print(f"\n[INFO] Cambiando de modelo: '{OCR_MODEL}' → '{REFINER_MODEL}'")
+    unload_model(OCR_MODEL)
+    time.sleep(2)  # pausa para asegurar liberación de VRAM
+    load_model(REFINER_MODEL)
+
+def finalize():
+    """Descarga todos los modelos al finalizar el proceso."""
+    print("\n[INFO] Descargando todos los modelos de la VRAM (limpieza final)...")
+    unload_all_models()
+
 if __name__ == "__main__":
-    load_ocr_model()
+    prepare_ocr_phase()

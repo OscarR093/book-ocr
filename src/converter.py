@@ -31,11 +31,19 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
     em { font-style: italic; }
     """
 
-    writer = fitz.DocumentWriter(output_pdf_path)
+    total_files = len([f for f in markdown_files if os.path.exists(f)])
+    print(f"[INFO] Iniciando generación de PDF: {total_files} archivos Markdown a procesar.")
+    print(f"[INFO] Ruta de salida: {output_pdf_path}")
 
-    for md_file in markdown_files:
+    writer = fitz.DocumentWriter(output_pdf_path)
+    pages_written = 0
+
+    for i, md_file in enumerate(markdown_files, 1):
         if not os.path.exists(md_file):
+            print(f"[WARN] [{i}/{total_files}] Archivo no encontrado, omitiendo: {md_file}")
             continue
+
+        print(f"[INFO] [{i}/{total_files}] Renderizando: {os.path.basename(md_file)}...", end=" ", flush=True)
             
         with open(md_file, "r", encoding="utf-8") as f:
             md_text = f.read()
@@ -84,18 +92,35 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
 
             story = fitz.Story(html=html_doc, user_css=css, archive=archive)
             more = 1
-            
-            while more:
+            page_count = 0
+            MAX_PAGES_PER_MD = 50  # límite de seguridad anti-bucle infinito
+
+            while more and page_count < MAX_PAGES_PER_MD:
                 device = writer.begin_page(page_rect)
                 more, _ = story.place(content_rect)
                 story.draw(device, None)
                 writer.end_page()
-                    
+                page_count += 1
+
+            if page_count >= MAX_PAGES_PER_MD and more:
+                print(f"AVISO (límite {MAX_PAGES_PER_MD} páginas alcanzado, contenido truncado)")
+            else:
+                print(f"OK ({page_count} página(s) de PDF generada(s))")
+
+            pages_written += 1
+
         except Exception as e:
-            print(f"[ERROR] Failed to render HTML story for {md_file}: {e}")
-            # If an error occurs, insert at least a blank page or ignore
+            print(f"ERROR")
+            print(f"[ERROR] Fallo al renderizar {os.path.basename(md_file)}: {e}")
+            # Insertar página en blanco para no perder paginación
             device = writer.begin_page(page_rect)
             writer.end_page()
 
-    writer.close()
-    print(f"[INFO] Saved final PDF successfully.")
+    try:
+        writer.close()
+    except Exception as e:
+        print(f"[ERROR] Fallo al cerrar el DocumentWriter: {e}")
+        raise
+
+    print(f"\n[INFO] PDF generado exitosamente. {pages_written}/{total_files} páginas renderizadas correctamente.")
+    print(f"[INFO] Archivo guardado en: {output_pdf_path}")

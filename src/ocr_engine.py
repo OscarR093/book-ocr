@@ -1,10 +1,9 @@
 import requests
 import base64
 import os
-import json
 import re
 
-from src.ollama_manager import OCR_MODEL, OLLAMA_API_BASE
+from src.ollama_manager import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT
 
 def _encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -12,15 +11,15 @@ def _encode_image(image_path):
 
 def extract_markdown(image_path):
     """
-    Given an image path, return the full page text content converted to markdown.
-    Uses DeepSeek-OCR specific prompt sensitivity recommendations.
+    Extrae el texto de una imagen de página como Markdown usando DeepSeek-OCR.
+    Usa el prompt exacto recomendado por la documentación oficial para máxima compatibilidad.
     """
-    print(f"[INFO] Extracting full text/markdown from {os.path.basename(image_path)}...")
+    print(f"[INFO] Extrayendo texto de {os.path.basename(image_path)}...")
     base64_image = _encode_image(image_path)
-    
-    # Prompt is critical for DeepSeek-OCR
+
+    # Prompt crítico para DeepSeek-OCR — no modificar la sintaxis del prefijo <|grounding|>
     prompt = "<|grounding|>Convert the document to markdown."
-    
+
     payload = {
         "model": OCR_MODEL,
         "messages": [
@@ -34,38 +33,36 @@ def extract_markdown(image_path):
     }
 
     try:
-        response = requests.post(f"{OLLAMA_API_BASE}/chat", json=payload)
+        response = requests.post(
+            f"{OLLAMA_API_BASE}/chat",
+            json=payload,
+            timeout=LLM_TIMEOUT
+        )
         if response.status_code == 200:
-            data = response.json()
-            content = data.get("message", {}).get("content", "")
+            content = response.json().get("message", {}).get("content", "")
             # Limpiar etiquetas de coordenadas de DeepSeek (<|ref|>...<|/det|>)
             cleaned = re.sub(r'<\|ref\|>.*?<\|/ref\|><\|det\|>.*?<\|/det\|>\s*', '', content)
             return cleaned
         else:
-            print(f"[ERROR] OCR Extraction failed: {response.text}")
+            print(f"[ERROR] Fallo en extracción OCR: {response.text}")
             return ""
+    except requests.Timeout:
+        print(f"[ERROR] Timeout ({LLM_TIMEOUT}s) alcanzado al extraer texto de {os.path.basename(image_path)}.")
+        return ""
     except requests.RequestException as e:
-        print(f"[ERROR] Request to Ollama API failed: {e}")
+        print(f"[ERROR] Error de conexión con Ollama API: {e}")
         return ""
 
 def analyze_layout(image_path):
     """
-    Given an image path, analyze the layout.
-    For DeepSeek-OCR, we can use specific prompts to get layout components, finding figures/images.
-    (Note: DeepSeek-OCR may output coordinates for figures. If not, we fall back to other layout tools or prompt tweaking.)
-    In this preliminary implementation, we will ask it to list bounding boxes of images if possible,
-    Or use another prompt. We will use the 'Parse the figure.' prompt from docs to see if it acts on specific images,
-    but for full layout `Given the layout of the image.` might return structure.
-    Let's initially try to request just the figure locations if supported, or gracefully degraded to text-only mode
-    if layout extraction is too complex.
+    Analiza el layout de la página para detectar regiones de imágenes o figuras.
+    Usa el prompt de grounding de DeepSeek-OCR para obtener bounding boxes.
     """
-    print(f"[INFO] Analyzing layout for {os.path.basename(image_path)}...")
+    print(f"[INFO] Analizando layout de {os.path.basename(image_path)}...")
     base64_image = _encode_image(image_path)
-    
-    # Prompt to get layout/bounding boxes for images. 
-    # DeepSeek-OCR doc says "<|grounding|>Given the layout of the image."
+
     prompt = "<|grounding|>Given the layout of the image."
-    
+
     payload = {
         "model": OCR_MODEL,
         "messages": [
@@ -79,15 +76,76 @@ def analyze_layout(image_path):
     }
 
     try:
-        response = requests.post(f"{OLLAMA_API_BASE}/chat", json=payload)
+        response = requests.post(
+            f"{OLLAMA_API_BASE}/chat",
+            json=payload,
+            timeout=LLM_TIMEOUT
+        )
         if response.status_code == 200:
-            data = response.json()
-            # This output needs parsing to extract actual coordinates for cropping.
-            return data.get("message", {}).get("content", "")
+            return response.json().get("message", {}).get("content", "")
         else:
-            print(f"[ERROR] Layout Analysis failed: {response.text}")
+            print(f"[ERROR] Fallo en análisis de layout: {response.text}")
             return ""
+    except requests.Timeout:
+        print(f"[ERROR] Timeout ({LLM_TIMEOUT}s) alcanzado al analizar layout de {os.path.basename(image_path)}.")
+        return ""
     except requests.RequestException as e:
-        print(f"[ERROR] Request to Ollama API failed: {e}")
+        print(f"[ERROR] Error de conexión con Ollama API: {e}")
         return ""
 
+def refine_italics(markdown_text, page_num):
+    """
+    Usa el modelo de refinamiento (qwen2.5:14b) para identificar y marcar el texto
+    que visualmente debería estar en cursiva según el contexto semántico.
+    Por ejemplo: títulos de libros, palabras en latín, términos técnicos, énfasis editorial.
+    
+    Solo modifica el Markdown para añadir marcado de cursivas (*texto*) donde corresponda.
+    No modifica el contenido del texto.
+    """
+    if not markdown_text.strip():
+        return markdown_text
+
+    print(f"[INFO] Refinando cursivas en página {page_num} con {REFINER_MODEL}...")
+
+    system_prompt = (
+        "You are a Markdown formatting specialist. Your only task is to identify words or phrases "
+        "in the provided text that are likely to be in italic print in the original scanned book "
+        "and wrap them with single *asterisks* in Markdown format. "
+        "These typically include: book titles, words in foreign languages (Latin, French, etc.), "
+        "technical terms being introduced, editorial emphasis, and any text enclosed in quotation marks "
+        "(both straight quotes \" and curly quotes \u201c\u201d). Text in quotes should be italicized AND "
+        "keep the surrounding quotation marks. "
+        "Do NOT translate, rephrase, or add any content. Return ONLY the modified Markdown text."
+    )
+
+    payload = {
+        "model": REFINER_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": markdown_text}
+        ],
+        "stream": False
+    }
+
+    try:
+        response = requests.post(
+            f"{OLLAMA_API_BASE}/chat",
+            json=payload,
+            timeout=LLM_TIMEOUT
+        )
+        if response.status_code == 200:
+            refined = response.json().get("message", {}).get("content", "")
+            if refined.strip():
+                return refined
+            else:
+                print(f"[WARN] El refinador devolvió texto vacío en página {page_num}. Usando original.")
+                return markdown_text
+        else:
+            print(f"[ERROR] Fallo en refinamiento de página {page_num}: {response.text}")
+            return markdown_text
+    except requests.Timeout:
+        print(f"[WARN] Timeout ({LLM_TIMEOUT}s) alcanzado refinando página {page_num}. Usando texto original.")
+        return markdown_text
+    except requests.RequestException as e:
+        print(f"[ERROR] Error de conexión durante refinamiento: {e}")
+        return markdown_text
