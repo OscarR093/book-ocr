@@ -10,7 +10,7 @@ from src.ollama_manager import (
 from src.pdf_processor import extract_pages_as_images
 from src.ocr_engine import analyze_layout, extract_markdown, refine_italics
 from src.layout_engine import parse_layout_and_crop, integrate_images_to_markdown
-from src.converter import create_pdf_from_markdown
+from src.converter import create_pdf_from_markdown, compress_pdf
 
 
 def _ocr_path(output_dir, page_num):
@@ -215,6 +215,21 @@ def main():
 
     print(f"\n--- [6] Generando PDF Final ({len(md_files)} páginas) ---")
     create_pdf_from_markdown(md_files, final_output_pdf)
+
+    # ─────────────────────────────────────────────
+    # COMPRESIÓN DE PDF
+    # ─────────────────────────────────────────────
+    compressed_pdf = final_output_pdf.replace(".pdf", "_compressed.pdf")
+    if compress_pdf(final_output_pdf, compressed_pdf):
+        # Si la compresión tuvo éxito, reemplazamos el original
+        try:
+            os.remove(final_output_pdf)
+            os.rename(compressed_pdf, final_output_pdf)
+            print(f"[INFO] PDF comprimido reemplazó al original.")
+        except Exception as e:
+            print(f"[WARN] No se pudo reemplazar el PDF original con el comprimido: {e}")
+    else:
+        print("[WARN] Se mantendrá el PDF original sin comprimir.")
 
     print("\n--- [7] Descargando todos los modelos de la VRAM ---")
     finalize()

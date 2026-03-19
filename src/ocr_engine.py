@@ -3,7 +3,7 @@ import base64
 import os
 import re
 
-from src.config import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT, REFINER_SYSTEM_PROMPT
+from src.config import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT, REFINER_SYSTEM_PROMPT, OCR_TIMEOUT
 
 def _encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -36,7 +36,7 @@ def extract_markdown(image_path):
         response = requests.post(
             f"{OLLAMA_API_BASE}/chat",
             json=payload,
-            timeout=LLM_TIMEOUT
+            timeout=OCR_TIMEOUT
         )
         if response.status_code == 200:
             content = response.json().get("message", {}).get("content", "")
@@ -47,7 +47,7 @@ def extract_markdown(image_path):
             print(f"[ERROR] Fallo en extracción OCR: {response.text}")
             return ""
     except requests.Timeout:
-        print(f"[ERROR] Timeout ({LLM_TIMEOUT}s) alcanzado al extraer texto de {os.path.basename(image_path)}.")
+        print(f"[ERROR] Timeout ({OCR_TIMEOUT}s) alcanzado al extraer texto de {os.path.basename(image_path)}.")
         return ""
     except requests.RequestException as e:
         print(f"[ERROR] Error de conexión con Ollama API: {e}")
@@ -79,7 +79,7 @@ def analyze_layout(image_path):
         response = requests.post(
             f"{OLLAMA_API_BASE}/chat",
             json=payload,
-            timeout=LLM_TIMEOUT
+            timeout=OCR_TIMEOUT
         )
         if response.status_code == 200:
             return response.json().get("message", {}).get("content", "")
@@ -87,7 +87,7 @@ def analyze_layout(image_path):
             print(f"[ERROR] Fallo en análisis de layout: {response.text}")
             return ""
     except requests.Timeout:
-        print(f"[ERROR] Timeout ({LLM_TIMEOUT}s) alcanzado al analizar layout de {os.path.basename(image_path)}.")
+        print(f"[ERROR] Timeout ({OCR_TIMEOUT}s) alcanzado al analizar layout de {os.path.basename(image_path)}.")
         return ""
     except requests.RequestException as e:
         print(f"[ERROR] Error de conexión con Ollama API: {e}")

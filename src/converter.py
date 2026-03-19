@@ -2,8 +2,9 @@ import fitz
 import os
 import re
 import markdown
+import subprocess
 
-from src.config import PDF_FONT_NORMAL, PDF_FONT_BOLD, PDF_FONT_ITALIC
+from src.config import PDF_FONT_NORMAL, PDF_FONT_BOLD, PDF_FONT_ITALIC, GS_PDF_SETTINGS
 
 def create_pdf_from_markdown(markdown_files, output_pdf_path):
     """
@@ -126,3 +127,38 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
 
     print(f"\n[INFO] PDF generado exitosamente. {pages_written}/{total_files} páginas renderizadas correctamente.")
     print(f"[INFO] Archivo guardado en: {output_pdf_path}")
+
+
+def compress_pdf(input_path, output_path):
+    """
+    Comprime un PDF usando Ghostscript.
+    Requiere que 'gs' esté instalado en el sistema.
+    """
+    print(f"\n[INFO] Comprimiendo PDF con Ghostscript (modo {GS_PDF_SETTINGS})...")
+    
+    cmd = [
+        "gs",
+        "-sDEVICE=pdfwrite",
+        "-dCompatibilityLevel=1.4",
+        f"-dPDFSETTINGS={GS_PDF_SETTINGS}",
+        "-dNOPAUSE",
+        "-dQUIET",
+        "-dBATCH",
+        f"-sOutputFile={output_path}",
+        input_path
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"[INFO] Compresión finalizada correctamente.")
+            return True
+        else:
+            print(f"[ERROR] Ghostscript falló: {result.stderr}")
+            return False
+    except FileNotFoundError:
+        print("[ERROR] Ghostscript ('gs') no está instalado en el sistema.")
+        return False
+    except Exception as e:
+        print(f"[ERROR] Error inesperado durante la compresión: {e}")
+        return False
