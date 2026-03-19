@@ -3,6 +3,8 @@ import os
 import re
 import markdown
 
+from src.config import PDF_FONT_NORMAL, PDF_FONT_BOLD, PDF_FONT_ITALIC
+
 def create_pdf_from_markdown(markdown_files, output_pdf_path):
     """
     Creates a final PDF using PyMuPDF from a list of markdown files containing text and images.
@@ -19,16 +21,16 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
     content_rect = fitz.Rect(margin, margin, page_width - margin, page_height - margin)
 
     # Basic CSS for formatting the HTML story
-    css = """
-    * { font-family: sans-serif; }
-    body { font-size: 11pt; line-height: 1.5; color: #333; }
-    h1 { font-size: 18pt; font-weight: bold; margin-top: 1.5em; margin-bottom: 0.5em; }
-    h2 { font-size: 16pt; font-weight: bold; margin-top: 1.2em; margin-bottom: 0.5em; }
-    h3 { font-size: 14pt; font-weight: bold; margin-top: 1em; margin-bottom: 0.5em; }
-    p { margin-bottom: 10pt; text-align: justify; }
-    img { max-width: 100%; margin-top: 10pt; margin-bottom: 10pt; }
-    strong { font-weight: bold; }
-    em { font-style: italic; }
+    css = f"""
+    * {{ font-family: {PDF_FONT_NORMAL}; }}
+    body {{ font-size: 13pt; line-height: 1.5; color: #333; }}
+    h1 {{ font-size: 20pt; font-weight: bold; font-family: {PDF_FONT_BOLD}; margin-top: 1.5em; margin-bottom: 0.5em; }}
+    h2 {{ font-size: 18pt; font-weight: bold; font-family: {PDF_FONT_BOLD}; margin-top: 1.2em; margin-bottom: 0.5em; }}
+    h3 {{ font-size: 16pt; font-weight: bold; font-family: {PDF_FONT_BOLD}; margin-top: 1em; margin-bottom: 0.5em; }}
+    p {{ margin-bottom: 10pt; text-align: justify; }}
+    img {{ max-width: 100%; margin-top: 10pt; margin-bottom: 10pt; }}
+    strong {{ font-weight: bold; font-family: {PDF_FONT_BOLD}; }}
+    em {{ font-style: italic; font-family: {PDF_FONT_ITALIC}; }}
     """
 
     total_files = len([f for f in markdown_files if os.path.exists(f)])

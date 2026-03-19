@@ -23,6 +23,20 @@ def _img_path(output_dir, page_num):
     return os.path.join(output_dir, f"page_{page_num}.png")
 
 
+def _ask_yes_no(question: str, default: bool = True) -> bool:
+    """Pregunta al usuario una pregunta de sí/no. Devuelve True para 'sí'."""
+    hint = "[S/n]" if default else "[s/N]"
+    while True:
+        answer = input(f"{question} {hint}: ").strip().lower()
+        if answer == "":
+            return default
+        if answer in ("s", "si", "sí", "y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("  Por favor responde 's' (sí) o 'n' (no).")
+
+
 def main():
     if len(sys.argv) < 2:
         print("Uso: python3 main.py <archivo.pdf>")
@@ -41,6 +55,14 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     final_output_pdf = os.path.join(output_base_dir, f"{pdf_name_no_ext}_final_ocr.pdf")
+
+    # ─────────────────────────────────────────────
+    # PREGUNTAS INICIALES DE CONFIGURACIÓN
+    # ─────────────────────────────────────────────
+    print("\n=== Configuración del proceso ===")
+    run_phase2 = _ask_yes_no("¿Deseas ejecutar la Fase 2 (refinamiento con LLM / Qwen)?")
+    keep_temp_files = _ask_yes_no("¿Deseas conservar los archivos temporales al finalizar?", default=False)
+    print()
 
     # ─────────────────────────────────────────────
     # DETECTAR ESTADO — ¿desde dónde continuamos?
@@ -128,44 +150,63 @@ def main():
         print("\n[INFO] Fase 1 (OCR) ya completa. Sin páginas pendientes.")
 
     # ─────────────────────────────────────────────
-    # FASE 2 — Refinamiento con Qwen
+    # FASE 2 — Refinamiento con Qwen (opcional)
     # ─────────────────────────────────────────────
-    pages_needing_refine = [
-        pn for pn, _ in page_images if pn not in existing_refined
-    ]
-
-    if pages_needing_refine:
-        print(f"\n--- [4] Cambiando a Qwen 2.5 para refinamiento ({len(pages_needing_refine)} páginas) ---")
-        switch_to_refiner_phase()
-
-        for page_num, _ in [(pn, None) for pn, _ in page_images if pn in pages_needing_refine]:
-            print(f"\n>> Refinando página {page_num}/{total_pages}...")
-
-            # Leer raw OCR
-            ocr_file = _ocr_path(output_dir, page_num)
-            if not os.path.exists(ocr_file):
-                print(f"[WARN] No se encontró archivo OCR para página {page_num}. Saltando.")
-                continue
-
-            with open(ocr_file, "r", encoding="utf-8") as f:
-                raw_markdown = f.read()
-
-            # Leer lista de imágenes recortadas
-            crops_file = os.path.join(output_dir, f"page_{page_num}_crops.txt")
-            cropped_images = []
-            if os.path.exists(crops_file):
-                with open(crops_file, "r", encoding="utf-8") as f:
-                    cropped_images = [line.strip() for line in f if line.strip()]
-
-            refined_markdown = refine_italics(raw_markdown, page_num)
-            final_md_text = integrate_images_to_markdown(refined_markdown, cropped_images)
-
-            with open(_refined_path(output_dir, page_num), "w", encoding="utf-8") as f:
-                f.write(final_md_text)
-
-            existing_refined.add(page_num)
+    if not run_phase2:
+        print("\n[INFO] Fase 2 (refinamiento con LLM) omitida por el usuario.")
+        # Usar los archivos _ocr.md directamente como archivo final cuando no hay refinamiento
+        for page_num, _ in page_images:
+            if page_num not in existing_refined:
+                ocr_file = _ocr_path(output_dir, page_num)
+                if os.path.exists(ocr_file):
+                    with open(ocr_file, "r", encoding="utf-8") as f:
+                        raw_markdown = f.read()
+                    crops_file = os.path.join(output_dir, f"page_{page_num}_crops.txt")
+                    cropped_images = []
+                    if os.path.exists(crops_file):
+                        with open(crops_file, "r", encoding="utf-8") as f:
+                            cropped_images = [line.strip() for line in f if line.strip()]
+                    final_md_text = integrate_images_to_markdown(raw_markdown, cropped_images)
+                    with open(_refined_path(output_dir, page_num), "w", encoding="utf-8") as f:
+                        f.write(final_md_text)
+                    existing_refined.add(page_num)
     else:
-        print("\n[INFO] Fase 2 (refinamiento) ya completa. Sin páginas pendientes.")
+        pages_needing_refine = [
+            pn for pn, _ in page_images if pn not in existing_refined
+        ]
+
+        if pages_needing_refine:
+            print(f"\n--- [4] Cambiando a Qwen 2.5 para refinamiento ({len(pages_needing_refine)} páginas) ---")
+            switch_to_refiner_phase()
+
+            for page_num, _ in [(pn, None) for pn, _ in page_images if pn in pages_needing_refine]:
+                print(f"\n>> Refinando página {page_num}/{total_pages}...")
+
+                # Leer raw OCR
+                ocr_file = _ocr_path(output_dir, page_num)
+                if not os.path.exists(ocr_file):
+                    print(f"[WARN] No se encontró archivo OCR para página {page_num}. Saltando.")
+                    continue
+
+                with open(ocr_file, "r", encoding="utf-8") as f:
+                    raw_markdown = f.read()
+
+                # Leer lista de imágenes recortadas
+                crops_file = os.path.join(output_dir, f"page_{page_num}_crops.txt")
+                cropped_images = []
+                if os.path.exists(crops_file):
+                    with open(crops_file, "r", encoding="utf-8") as f:
+                        cropped_images = [line.strip() for line in f if line.strip()]
+
+                refined_markdown = refine_italics(raw_markdown, page_num)
+                final_md_text = integrate_images_to_markdown(refined_markdown, cropped_images)
+
+                with open(_refined_path(output_dir, page_num), "w", encoding="utf-8") as f:
+                    f.write(final_md_text)
+
+                existing_refined.add(page_num)
+        else:
+            print("\n[INFO] Fase 2 (refinamiento) ya completa. Sin páginas pendientes.")
 
     # ─────────────────────────────────────────────
     # FASE 3 — Compilación de PDF Final
@@ -178,12 +219,15 @@ def main():
     print("\n--- [7] Descargando todos los modelos de la VRAM ---")
     finalize()
 
-    print("\n--- [8] Limpiando archivos temporales ---")
-    try:
-        shutil.rmtree(output_dir)
-        print(f"[INFO] Archivos temporales eliminados en {output_dir}")
-    except Exception as e:
-        print(f"[WARN] No se pudo limpiar la carpeta temporal: {e}")
+    if keep_temp_files:
+        print(f"\n[INFO] Archivos temporales conservados en: {output_dir}")
+    else:
+        print("\n--- [8] Limpiando archivos temporales ---")
+        try:
+            shutil.rmtree(output_dir)
+            print(f"[INFO] Archivos temporales eliminados en {output_dir}")
+        except Exception as e:
+            print(f"[WARN] No se pudo limpiar la carpeta temporal: {e}")
 
     print(f"\n[ÉXITO] Proceso completado. Archivo final: {final_output_pdf}")
 

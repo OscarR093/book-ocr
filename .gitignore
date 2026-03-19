@@ -19,6 +19,10 @@ venv/
 # Output
 output/
 
+# Files
+
+*.pdf
+
 # Jupyter Notebooks
 .ipynb_checkpoints/
 

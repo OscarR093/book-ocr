@@ -3,7 +3,7 @@ import base64
 import os
 import re
 
-from src.ollama_manager import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT
+from src.config import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT, REFINER_SYSTEM_PROMPT
 
 def _encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -107,16 +107,7 @@ def refine_italics(markdown_text, page_num):
 
     print(f"[INFO] Refinando cursivas en página {page_num} con {REFINER_MODEL}...")
 
-    system_prompt = (
-        "You are a Markdown formatting specialist. Your only task is to identify words or phrases "
-        "in the provided text that are likely to be in italic print in the original scanned book "
-        "and wrap them with single *asterisks* in Markdown format. "
-        "These typically include: book titles, words in foreign languages (Latin, French, etc.), "
-        "technical terms being introduced, editorial emphasis, and any text enclosed in quotation marks "
-        "(both straight quotes \" and curly quotes \u201c\u201d). Text in quotes should be italicized AND "
-        "keep the surrounding quotation marks. "
-        "Do NOT translate, rephrase, or add any content. Return ONLY the modified Markdown text."
-    )
+    system_prompt = REFINER_SYSTEM_PROMPT
 
     payload = {
         "model": REFINER_MODEL,

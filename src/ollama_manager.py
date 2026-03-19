@@ -2,12 +2,7 @@ import requests
 import time
 import sys
 
-OCR_MODEL = "deepseek-ocr"
-REFINER_MODEL = "qwen2.5:14b"
-OLLAMA_API_BASE = "http://localhost:11434/api"
-
-# Timeout en segundos para las llamadas a la API de Ollama (3 minutos)
-LLM_TIMEOUT = 180
+from src.config import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT
 
 def check_ollama_running():
     """Verifica si el servicio de Ollama está accesible."""
