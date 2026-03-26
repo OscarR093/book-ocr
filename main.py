@@ -10,7 +10,7 @@ from src.ollama_manager import (
 from src.pdf_processor import extract_pages_as_images
 from src.ocr_engine import analyze_layout, extract_markdown, refine_italics
 from src.layout_engine import parse_layout_and_crop, integrate_images_to_markdown
-from src.converter import create_pdf_from_markdown, compress_pdf
+from src.converter import create_pdf_from_markdown, compress_pdf, remove_blank_pages
 
 
 def _ocr_path(output_dir, page_num):
@@ -217,6 +217,15 @@ def main():
     create_pdf_from_markdown(md_files, final_output_pdf)
 
     # ─────────────────────────────────────────────
+    # LIMPIEZA DE PÁGINAS EN BLANCO
+    # ─────────────────────────────────────────────
+    cleaned_pdf = final_output_pdf.replace(".pdf", "_cleaned.pdf")
+    if remove_blank_pages(final_output_pdf, cleaned_pdf):
+        # Si se eliminaron páginas, el archivo "final" ahora es el cleaned
+        os.remove(final_output_pdf)
+        os.rename(cleaned_pdf, final_output_pdf)
+
+    # ─────────────────────────────────────────────
     # COMPRESIÓN DE PDF
     # ─────────────────────────────────────────────
     compressed_pdf = final_output_pdf.replace(".pdf", "_compressed.pdf")
@@ -228,6 +237,8 @@ def main():
             print(f"[INFO] PDF comprimido reemplazó al original.")
         except Exception as e:
             print(f"[WARN] No se pudo reemplazar el PDF original con el comprimido: {e}")
+            if os.path.exists(compressed_pdf):
+                print(f"[INFO] PDF comprimido disponible en: {compressed_pdf}")
     else:
         print("[WARN] Se mantendrá el PDF original sin comprimir.")
 

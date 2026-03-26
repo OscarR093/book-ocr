@@ -29,7 +29,11 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
     h2 {{ font-size: 18pt; font-weight: bold; font-family: {PDF_FONT_BOLD}; margin-top: 1.2em; margin-bottom: 0.5em; }}
     h3 {{ font-size: 16pt; font-weight: bold; font-family: {PDF_FONT_BOLD}; margin-top: 1em; margin-bottom: 0.5em; }}
     p {{ margin-bottom: 10pt; text-align: justify; }}
-    img {{ max-width: 100%; margin-top: 10pt; margin-bottom: 10pt; }}
+    img {{ 
+        display: block;
+        object-fit: contain; 
+        margin: 0;
+    }}
     strong {{ font-weight: bold; font-family: {PDF_FONT_BOLD}; }}
     em {{ font-style: italic; font-family: {PDF_FONT_ITALIC}; }}
     """
@@ -73,9 +77,35 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
         # y dejar que Archive resuelva la ruta completa
         def repl_html(match):
             alt = match.group(1)
-            path = os.path.abspath(match.group(2))
+            img_path = os.path.abspath(match.group(2))
+            
+            # Calcular dimensiones para asegurar que quepa en la página
+            width_attr = ""
+            height_attr = ""
+            if os.path.exists(img_path):
+                try:
+                    # Usar fitz para obtener el tamaño de la imagen sin dependencias extra
+                    with fitz.open(img_path) as img_doc:
+                        img_rect = img_doc[0].rect
+                        w, h = img_rect.width, img_rect.height
+                        
+                        # Límites seguros para A4 con márgenes (595x842, marging 50)
+                        max_w = page_width - (margin * 2)
+                        max_h = page_height - (margin * 2) - 20 # margen extra seguridad
+                        
+                        # Escalar manteniendo aspecto
+                        ratio = min(max_w / w, max_h / h)
+                        if ratio < 1.0:
+                            w *= ratio
+                            h *= ratio
+                        
+                        width_attr = f' width="{int(w)}"'
+                        height_attr = f' height="{int(h)}"'
+                except Exception as e:
+                    print(f"[WARN] No se pudo obtener tamaño de imagen {os.path.basename(img_path)}: {e}")
+            
             # Pasar solo el nombre del archivo; Archive buscará en los directorios registrados
-            return f'<img src="{os.path.basename(path)}" alt="{alt}"/>'
+            return f'<img src="{os.path.basename(img_path)}"{width_attr}{height_attr} alt="{alt}"/>'
         
         html_content = markdown.markdown(md_text, extensions=['extra', 'tables'])
         # Reemplazar tags de img que el markdown generó con versiones que usan solo el basename
@@ -96,14 +126,32 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
             story = fitz.Story(html=html_doc, user_css=css, archive=archive)
             more = 1
             page_count = 0
-            MAX_PAGES_PER_MD = 50  # límite de seguridad anti-bucle infinito
+            MAX_PAGES_PER_MD = 3  # Una página escaneada nunca debería ocupar más de 3 páginas de PDF
 
+            empty_page_count = 0
             while more and page_count < MAX_PAGES_PER_MD:
                 device = writer.begin_page(page_rect)
-                more, _ = story.place(content_rect)
-                story.draw(device, None)
-                writer.end_page()
+                try:
+                    more, filled_rect_data = story.place(content_rect)
+                    filled_rect = fitz.Rect(filled_rect_data)
+                    
+                    # Verificar si realmente se colocó contenido en esta página
+                    # Si el contenido colocado es casi nulo (menos de 5pt de alto), algo no cabe
+                    if filled_rect.is_empty or filled_rect.height < 5:
+                        empty_page_count += 1
+                        print(f"[WARN] No se pudo colocar contenido en página {page_count + 1} de {os.path.basename(md_file)}.")
+                    else:
+                        empty_page_count = 0
+                        story.draw(device, None)
+                finally:
+                    writer.end_page()
+                
                 page_count += 1
+                
+                # Si una página sale vacía, es que el siguiente bloque (ej. imagen) es muy grande
+                # No intentamos más páginas para este archivo Markdown.
+                if empty_page_count > 0:
+                    break
 
             if page_count >= MAX_PAGES_PER_MD and more:
                 print(f"AVISO (límite {MAX_PAGES_PER_MD} páginas alcanzado, contenido truncado)")
@@ -127,6 +175,47 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
 
     print(f"\n[INFO] PDF generado exitosamente. {pages_written}/{total_files} páginas renderizadas correctamente.")
     print(f"[INFO] Archivo guardado en: {output_pdf_path}")
+
+
+def remove_blank_pages(input_path, output_path):
+    """
+    Lee un PDF y genera uno nuevo omitiendo las páginas que no contienen
+    texto, imágenes ni dibujos (gráficos vectoriales).
+    """
+    print(f"\n--- [6.1] Auditando páginas en blanco ---")
+    try:
+        doc = fitz.open(input_path)
+        new_doc = fitz.open()
+        
+        blank_count = 0
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            
+            # Criterios de página "no vacía"
+            has_text = len(page.get_text().strip()) > 0
+            has_images = len(page.get_images()) > 0
+            has_drawings = len(page.get_drawings()) > 0
+            
+            if has_text or has_images or has_drawings:
+                new_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
+            else:
+                blank_count += 1
+        
+        if blank_count > 0:
+            new_doc.save(output_path)
+            print(f"[INFO] Se eliminaron {blank_count} páginas en blanco.")
+            new_doc.close()
+            doc.close()
+            return True
+        else:
+            print("[INFO] No se detectaron páginas en blanco.")
+            new_doc.close()
+            doc.close()
+            return False
+            
+    except Exception as e:
+        print(f"[ERROR] Error al limpiar páginas en blanco: {e}")
+        return False
 
 
 def compress_pdf(input_path, output_path):
