@@ -107,7 +107,20 @@ def create_pdf_from_markdown(markdown_files, output_pdf_path):
             # Pasar solo el nombre del archivo; Archive buscará en los directorios registrados
             return f'<img src="{os.path.basename(img_path)}"{width_attr}{height_attr} alt="{alt}"/>'
         
-        html_content = markdown.markdown(md_text, extensions=['extra', 'tables'])
+        try:
+            html_content = markdown.markdown(md_text, extensions=['extra', 'tables'])
+        except Exception as e:
+            print(f"[WARN] Error de parseo en python-markdown (posible formato corrupto generado por OCR) en {os.path.basename(md_file)}: {e}")
+            # Fallback: escapar HTML, pero tratar de renderizar las imágenes de todas formas
+            import html
+            safe_text = html.escape(md_text)
+            safe_text = re.sub(
+                 r'!\[([^\]]*)\]\((.*?)\)', 
+                 lambda m: f'<br><img src="{os.path.basename(m.group(2))}" alt="{m.group(1)}"/><br>', 
+                 safe_text
+            )
+            html_content = f"<div style='white-space: pre-wrap; font-family: {PDF_FONT_NORMAL};'>{safe_text}</div>"
+        
         # Reemplazar tags de img que el markdown generó con versiones que usan solo el basename
         html_content = re.sub(
             r'<img ([^>]*)src="([^"]+)"([^>]*)>',

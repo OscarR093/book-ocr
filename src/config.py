@@ -18,17 +18,34 @@ OCR_MODEL = "deepseek-ocr"
 REFINER_MODEL = "qwen2.5:14b"
 
 # ───────────────────────────────────────────
+# SELECCIÓN DE BACKEND
+# ───────────────────────────────────────────
+# Puedes usar "ollama" o "vllm"
+BACKEND = "vllm"
+
+# ───────────────────────────────────────────
 # API DE OLLAMA
 # ───────────────────────────────────────────
 
 OLLAMA_API_BASE = "http://localhost:11434/api"
 
-# Tiempo máximo (en segundos) de espera para cada llamada a la API.
+# ───────────────────────────────────────────
+# API DE vLLM
+# ───────────────────────────────────────────
+
+VLLM_API_BASE = "http://localhost:8000/v1"
+VLLM_MODEL = "deepseek-ai/DeepSeek-OCR-2" # Nombre del modelo de la API compatible con OpenAI
+
+VLLM_CONCURRENCY = 8 # Número de peticiones en paralelo para OCR
+VLLM_MAX_TOKENS = 2048
+VLLM_TEMPERATURE = 0.3
+
+# Tiempo máximo (en segundos) de espera para cada llamada a la API común.
 LLM_TIMEOUT = 180  # 3 minutos
 
 # Tiempo máximo específico para la extracción OCR (Fase 1).
 # Si el modelo se queda colgado, este tiempo permite omitir la página y continuar.
-OCR_TIMEOUT = 90
+OCR_TIMEOUT = 180 # Aumentado por precaución con concurrencia
 
 # ───────────────────────────────────────────
 # TIPOGRAFÍA DEL PDF GENERADO

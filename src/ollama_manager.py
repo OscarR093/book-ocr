@@ -2,7 +2,7 @@ import requests
 import time
 import sys
 
-from src.config import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT
+from src.config import BACKEND, OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT
 
 def check_ollama_running():
     """Verifica si el servicio de Ollama está accesible."""
@@ -75,6 +75,9 @@ def load_model(model_name):
 
 def prepare_ocr_phase():
     """Inicializa Ollama y carga el modelo de OCR para la fase 1."""
+    if BACKEND == "vllm":
+        print("[INFO] Usando vLLM backend. Saltando gestión de carga de modelos.")
+        return
     if not check_ollama_running():
         sys.exit(1)
     unload_all_models()
@@ -82,6 +85,8 @@ def prepare_ocr_phase():
 
 def switch_to_refiner_phase():
     """Descarga el modelo OCR y carga el modelo de refinamiento para la fase 2."""
+    if BACKEND == "vllm":
+        return
     print(f"\n[INFO] Cambiando de modelo: '{OCR_MODEL}' → '{REFINER_MODEL}'")
     unload_model(OCR_MODEL)
     time.sleep(2)  # pausa para asegurar liberación de VRAM
@@ -89,6 +94,8 @@ def switch_to_refiner_phase():
 
 def finalize():
     """Descarga todos los modelos al finalizar el proceso."""
+    if BACKEND == "vllm":
+        return
     print("\n[INFO] Descargando todos los modelos de la VRAM (limpieza final)...")
     unload_all_models()
 

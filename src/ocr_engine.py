@@ -3,7 +3,11 @@ import base64
 import os
 import re
 
-from src.config import OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT, REFINER_SYSTEM_PROMPT, OCR_TIMEOUT
+from src.config import (
+    BACKEND, OCR_MODEL, REFINER_MODEL, OLLAMA_API_BASE, LLM_TIMEOUT, 
+    REFINER_SYSTEM_PROMPT, OCR_TIMEOUT, VLLM_API_BASE, VLLM_MODEL, 
+    VLLM_MAX_TOKENS, VLLM_TEMPERATURE
+)
 
 def _encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -20,26 +24,47 @@ def extract_markdown(image_path):
     # Prompt crítico para DeepSeek-OCR — no modificar la sintaxis del prefijo <|grounding|>
     prompt = "<|grounding|>Convert the document to markdown."
 
-    payload = {
-        "model": OCR_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [base64_image]
-            }
-        ],
-        "stream": False
-    }
+    if BACKEND == "vllm":
+        payload = {
+            "model": VLLM_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]
+                }
+            ],
+            "temperature": VLLM_TEMPERATURE,
+            "max_tokens": VLLM_MAX_TOKENS
+        }
+        api_url = f"{VLLM_API_BASE}/chat/completions"
+    else:
+        payload = {
+            "model": OCR_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "images": [base64_image]
+                }
+            ],
+            "stream": False
+        }
+        api_url = f"{OLLAMA_API_BASE}/chat"
 
     try:
         response = requests.post(
-            f"{OLLAMA_API_BASE}/chat",
+            api_url,
             json=payload,
             timeout=OCR_TIMEOUT
         )
         if response.status_code == 200:
-            content = response.json().get("message", {}).get("content", "")
+            if BACKEND == "vllm":
+                content = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            else:
+                content = response.json().get("message", {}).get("content", "")
             # Limpiar etiquetas de coordenadas de DeepSeek (<|ref|>...<|/det|>)
             cleaned = re.sub(r'<\|ref\|>.*?<\|/ref\|><\|det\|>.*?<\|/det\|>\s*', '', content)
             return cleaned
@@ -50,7 +75,8 @@ def extract_markdown(image_path):
         print(f"[ERROR] Timeout ({OCR_TIMEOUT}s) alcanzado al extraer texto de {os.path.basename(image_path)}.")
         return ""
     except requests.RequestException as e:
-        print(f"[ERROR] Error de conexión con Ollama API: {e}")
+        api_name = "vLLM" if BACKEND == "vllm" else "Ollama"
+        print(f"[ERROR] Error de conexión con {api_name} API: {e}")
         return ""
 
 def analyze_layout(image_path):
@@ -63,26 +89,47 @@ def analyze_layout(image_path):
 
     prompt = "<|grounding|>Given the layout of the image."
 
-    payload = {
-        "model": OCR_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [base64_image]
-            }
-        ],
-        "stream": False
-    }
+    if BACKEND == "vllm":
+        payload = {
+            "model": VLLM_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]
+                }
+            ],
+            "temperature": VLLM_TEMPERATURE,
+            "max_tokens": VLLM_MAX_TOKENS
+        }
+        api_url = f"{VLLM_API_BASE}/chat/completions"
+    else:
+        payload = {
+            "model": OCR_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "images": [base64_image]
+                }
+            ],
+            "stream": False
+        }
+        api_url = f"{OLLAMA_API_BASE}/chat"
 
     try:
         response = requests.post(
-            f"{OLLAMA_API_BASE}/chat",
+            api_url,
             json=payload,
             timeout=OCR_TIMEOUT
         )
         if response.status_code == 200:
-            return response.json().get("message", {}).get("content", "")
+            if BACKEND == "vllm":
+                return response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            else:
+                return response.json().get("message", {}).get("content", "")
         else:
             print(f"[ERROR] Fallo en análisis de layout: {response.text}")
             return ""
@@ -90,7 +137,8 @@ def analyze_layout(image_path):
         print(f"[ERROR] Timeout ({OCR_TIMEOUT}s) alcanzado al analizar layout de {os.path.basename(image_path)}.")
         return ""
     except requests.RequestException as e:
-        print(f"[ERROR] Error de conexión con Ollama API: {e}")
+        api_name = "vLLM" if BACKEND == "vllm" else "Ollama"
+        print(f"[ERROR] Error de conexión con {api_name} API: {e}")
         return ""
 
 def refine_italics(markdown_text, page_num):

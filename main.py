@@ -8,9 +8,11 @@ from src.ollama_manager import (
     finalize
 )
 from src.pdf_processor import extract_pages_as_images
-from src.ocr_engine import analyze_layout, extract_markdown, refine_italics
-from src.layout_engine import parse_layout_and_crop, integrate_images_to_markdown
+from src.ocr_engine import extract_markdown, refine_italics
+from src.layout_engine import parse_layout_and_crop, integrate_images_to_markdown, process_inline_images
 from src.converter import create_pdf_from_markdown, compress_pdf, remove_blank_pages
+from src.config import BACKEND, VLLM_CONCURRENCY
+import concurrent.futures
 
 
 def _ocr_path(output_dir, page_num):
@@ -60,7 +62,11 @@ def main():
     # PREGUNTAS INICIALES DE CONFIGURACIÓN
     # ─────────────────────────────────────────────
     print("\n=== Configuración del proceso ===")
-    run_phase2 = _ask_yes_no("¿Deseas ejecutar la Fase 2 (refinamiento con LLM / Qwen)?")
+    if BACKEND == "vllm":
+        print("[INFO] Usando vLLM backend. La Fase 2 de limpieza/refinamiento se omite automáticamente.")
+        run_phase2 = False
+    else:
+        run_phase2 = _ask_yes_no("¿Deseas ejecutar la Fase 2 (refinamiento con LLM / Qwen)?")
     keep_temp_files = _ask_yes_no("¿Deseas conservar los archivos temporales al finalizar?", default=False)
     print()
 
@@ -129,12 +135,10 @@ def main():
         print(f"\n--- [3] OCR con DeepSeek-OCR ({len(pages_needing_ocr)} páginas pendientes) ---")
         prepare_ocr_phase()
 
-        for page_num, img_path in pages_needing_ocr:
+        def process_ocr_page(page_num, img_path):
             print(f"\n>> OCR Página {page_num}/{total_pages}...")
-
-            layout_text = analyze_layout(img_path)
-            cropped_images = parse_layout_and_crop(img_path, layout_text, output_dir, page_num)
             markdown_text = extract_markdown(img_path)
+            markdown_text, cropped_images = process_inline_images(img_path, markdown_text, output_dir, page_num)
 
             # Guardar como _ocr.md (diferenciado del refinado)
             with open(_ocr_path(output_dir, page_num), "w", encoding="utf-8") as f:
@@ -144,8 +148,19 @@ def main():
             crops_file = os.path.join(output_dir, f"page_{page_num}_crops.txt")
             with open(crops_file, "w", encoding="utf-8") as f:
                 f.write("\n".join(cropped_images))
+            return page_num
 
-            existing_ocr.add(page_num)
+        max_workers = VLLM_CONCURRENCY if BACKEND == "vllm" else 1
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_ocr_page, pn, ip): pn for pn, ip in pages_needing_ocr}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    pnum = future.result()
+                    existing_ocr.add(pnum)
+                    print(f"\n<< Completado OCR Página {pnum}/{total_pages}")
+                except Exception as exc:
+                    print(f"\n[ERROR] Excepción durante OCR: {exc}")
     else:
         print("\n[INFO] Fase 1 (OCR) ya completa. Sin páginas pendientes.")
 
